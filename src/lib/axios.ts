@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 export const axiosInstance = axios.create({
-  baseURL:"https://chat-app-vyqv.onrender.com/api",
+  baseURL:import.meta.env.BACKEND_URL,
   withCredentials:true,
 })
 

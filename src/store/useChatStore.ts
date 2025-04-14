@@ -3,7 +3,6 @@ import toast from "react-hot-toast";
 import { axiosInstance } from "../lib/axios";
 import { useAuthStore } from "./useAuthStore";
 
-// Data shape for sending a message
 export interface SendMessageData {
   text?: string;
   image?: string;
