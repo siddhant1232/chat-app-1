@@ -9,7 +9,7 @@ const BASE_URL =
     : "https://chat-app-vyqv.onrender.com"; 
 
 
-    
+
     console.log("Backend URL:", import.meta.env.VITE_BACKEND_URL);
 
 
@@ -81,7 +81,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   signup: async (data: SignupData) => {
     set({ isSigningUp: true });
     try {
-      const res = await axiosInstance.post("/api/auth/signup", data);
+      const res = await axiosInstance.post("/auth/signup", data);
       set({ authUser: res.data });
       toast.success("Account created successfully");
       get().connectSocket();
