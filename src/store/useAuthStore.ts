@@ -9,6 +9,10 @@ const BASE_URL =
     : "https://chat-app-vyqv.onrender.com"; 
 
 
+    
+    console.log("Backend URL:", import.meta.env.VITE_BACKEND_URL);
+
+
 interface SignupData {
   fullname: string;
   email: string;
