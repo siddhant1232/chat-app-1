@@ -24,13 +24,15 @@ interface ChatStoreState {
   selectedUser: User | null;
   isUsersLoading: boolean;
   isMessagesLoading: boolean;
-  socket: any; // Consider proper typing for socket
+  socket: any;
   initializeSocket: () => void;
   disconnectSocket: () => void;
   getUsers: () => Promise<void>;
   getMessages: (userId: string) => Promise<void>;
   sendMessage: (messageData: { text?: string; image?: string }) => Promise<void>;
   setSelectedUser: (user: User | null) => void;
+  subscribeToMessages: () => void;
+  unsubscribeFromMessages: () => void;
 }
 
 export const useChatStore = create<ChatStoreState>((set, get) => ({
@@ -136,5 +138,25 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   setSelectedUser: (user) => {
     set({ selectedUser: user, messages: [] });
     if (user) get().getMessages(user._id);
-  }
+  },
+
+  subscribeToMessages: () => {
+    const { socket, selectedUser } = get();
+    if (!socket || !selectedUser) return;
+
+    socket.on("newMessage", (newMessage: Message) => {
+      if (newMessage.senderId === selectedUser._id || 
+          newMessage.receiverId === selectedUser._id) {
+        set(state => ({ messages: [...state.messages, newMessage] }));
+      }
+    });
+  },
+
+  unsubscribeFromMessages: () => {
+    const { socket } = get();
+    if (socket) {
+      socket.off("newMessage");
+    }
+  },
+
 }));
