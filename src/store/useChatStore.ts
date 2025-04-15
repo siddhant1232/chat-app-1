@@ -1,25 +1,36 @@
 import { create } from "zustand";
 import toast from "react-hot-toast";
 import { axiosInstance } from "../lib/axios";
-import { useAuthStore } from "./useAuthStore";
+import io from "socket.io-client";
 
-export interface SendMessageData {
+interface Message {
+  _id: string;
+  senderId: string;
+  receiverId: string;
   text?: string;
   image?: string;
+  createdAt: string;
+}
+
+interface User {
+  _id: string;
+  fullname: string;
+  profilepic?: string;
 }
 
 interface ChatStoreState {
-  messages: any[];
-  users: any[];
-  selectedUser: any | null;
+  messages: Message[];
+  users: User[];
+  selectedUser: User | null;
   isUsersLoading: boolean;
   isMessagesLoading: boolean;
+  socket: any; // Consider proper typing for socket
+  initializeSocket: () => void;
+  disconnectSocket: () => void;
   getUsers: () => Promise<void>;
   getMessages: (userId: string) => Promise<void>;
-  sendMessage: (messageData: SendMessageData) => Promise<void>;
-  subscribeToMessages: () => void;
-  unsubscribeFromMessages: () => void;
-  setSelectedUser: (selectedUser: any) => void;
+  sendMessage: (messageData: { text?: string; image?: string }) => Promise<void>;
+  setSelectedUser: (user: User | null) => void;
 }
 
 export const useChatStore = create<ChatStoreState>((set, get) => ({
@@ -28,6 +39,39 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   selectedUser: null,
   isUsersLoading: false,
   isMessagesLoading: false,
+  socket: null,
+
+  initializeSocket: () => {
+    const socket = io(import.meta.env.VITE_WORKING_MODE === 'production' 
+      ? 'https://chat-app-vyqv.onrender.com' 
+      : 'http://localhost:5001', {
+      autoConnect: false,
+    });
+
+    socket.on('connect', () => {
+      console.log('Socket connected');
+    });
+
+    socket.on('newMessage', (newMessage: Message) => {
+      const { selectedUser } = get();
+      if (selectedUser && 
+          (newMessage.senderId === selectedUser._id || 
+           newMessage.receiverId === selectedUser._id)) {
+        set(state => ({ messages: [...state.messages, newMessage] }));
+      }
+    });
+
+    set({ socket });
+    socket.connect();
+  },
+
+  disconnectSocket: () => {
+    const { socket } = get();
+    if (socket) {
+      socket.disconnect();
+      set({ socket: null });
+    }
+  },
 
   getUsers: async () => {
     set({ isUsersLoading: true });
@@ -35,8 +79,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       const res = await axiosInstance.get("/messages/users");
       set({ users: res.data });
     } catch (error: any) {
-      const message = error?.response?.data?.error || "An unexpected error occurred.";
-      toast.error(message);
+      toast.error(error.response?.data?.error || "Failed to load users");
     } finally {
       set({ isUsersLoading: false });
     }
@@ -48,52 +91,50 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       const res = await axiosInstance.get(`/messages/${userId}`);
       set({ messages: res.data });
     } catch (error: any) {
-      const message = error?.response?.data?.error || "An unexpected error occurred.";
-      toast.error(message);
+      toast.error(error.response?.data?.error || "Failed to load messages");
     } finally {
       set({ isMessagesLoading: false });
     }
   },
 
-  sendMessage: async (messageData: SendMessageData) => {
-    const { selectedUser, messages } = get();
-
-    if (!selectedUser?._id) {
-      toast.error("No user selected to send the message to.");
-      return;
-    }
-    if (!messageData.text && !messageData.image) {
-      toast.error("Please enter a message or attach an image.");
+  sendMessage: async (messageData) => {
+    const { selectedUser, socket } = get();
+    if (!selectedUser) {
+      toast.error("No user selected");
       return;
     }
 
     try {
-      const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, messageData);
-      set({ messages: [...messages, res.data] });
-      console.log("🔥 messageData before sending:", messageData);
+      const formData = new FormData();
+      if (messageData.text) formData.append('text', messageData.text);
+      if (messageData.image) {
+        // Convert base64 to blob if needed
+        const blob = await fetch(messageData.image).then(r => r.blob());
+        formData.append('file', blob);
+      }
+
+      const res = await axiosInstance.post(
+        `/messages/send/${selectedUser._id}`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+
+      set(state => ({ messages: [...state.messages, res.data] }));
+      
+      // Notify via socket
+      if (socket) {
+        socket.emit('sendMessage', {
+          receiverId: selectedUser._id,
+          message: res.data
+        });
+      }
     } catch (error: any) {
-      const message = error?.response?.data?.error || "An unexpected error occurred.";
-      toast.error(message);
+      toast.error(error.response?.data?.error || "Failed to send message");
     }
   },
 
-  subscribeToMessages: () => {
-    const { selectedUser } = get();
-    if (!selectedUser) return;
-
-    const socket = useAuthStore.getState().socket;
-    socket.on("newMessage", (newMessage: { senderId: string }) => {
-      const isFromSelectedUser = newMessage.senderId === selectedUser._id;
-      if (!isFromSelectedUser) return;
-
-      set({ messages: [...get().messages, newMessage] });
-    });
-  },
-
-  unsubscribeFromMessages: () => {
-    const socket = useAuthStore.getState().socket;
-    socket.off("newMessage");
-  },
-
-  setSelectedUser: (selectedUser) => set({ selectedUser }),
+  setSelectedUser: (user) => {
+    set({ selectedUser: user, messages: [] });
+    if (user) get().getMessages(user._id);
+  }
 }));

@@ -7,4 +7,16 @@ export const axiosInstance = axios.create({
   withCredentials: true,
 });
 
+// Add response interceptor for consistent error handling
+axiosInstance.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response?.status === 401) {
+      // Handle unauthorized errors
+      window.location.href = '/signin';
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default axios;
