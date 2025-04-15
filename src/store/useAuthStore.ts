@@ -149,21 +149,36 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   connectSocket: () => {
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;
-
+  
+    // Ensure the URL is correct (no `/api` or trailing slash)
     const socket = io(BASE_URL, {
+      transportOptions: {
+        polling: {
+          extraHeaders: {
+            "Authorization": `Bearer ${document.cookie}`, // Replace with your auth mechanism
+          },
+        },
+      }, // Required for cookies/auth
       query: {
         userId: authUser._id,
       },
     });
-    socket.connect();
-
-    set({ socket });
-
+  
+    socket.on("connect", () => {
+      console.log("Socket connected!");
+    });
+  
+    socket.on("disconnect", () => {
+      console.log("Socket disconnected");
+    });
+  
     socket.on("getOnlineUsers", (userIds: string[]) => {
       set({ onlineUsers: userIds });
     });
+  
+    set({ socket });
   },
-
+  
   disconnectSocket: () => {
     if (get().socket?.connected) get().socket.disconnect();
   },
