@@ -1,6 +1,6 @@
+// src/store/useChatStore.ts
 import { create } from "zustand";
 import toast from "react-hot-toast";
-import { axiosInstance } from "../lib/axios";
 import io from "socket.io-client";
 
 interface Message {
@@ -29,11 +29,16 @@ interface ChatStoreState {
   disconnectSocket: () => void;
   getUsers: () => Promise<void>;
   getMessages: (userId: string) => Promise<void>;
-  sendMessage: (messageData: { text?: string; image?: string }) => Promise<void>;
+  sendMessage: (messageData: { text?: string; image?: File | string }) => Promise<void>;
   setSelectedUser: (user: User | null) => void;
   subscribeToMessages: () => void;
   unsubscribeFromMessages: () => void;
 }
+
+const BASE_URL =
+  import.meta.env.VITE_WORKING_MODE === "production"
+    ? "https://chat-app-vyqv.onrender.com"
+    : "http://localhost:5001";
 
 export const useChatStore = create<ChatStoreState>((set, get) => ({
   messages: [],
@@ -44,22 +49,22 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   socket: null,
 
   initializeSocket: () => {
-    const socket = io(import.meta.env.VITE_WORKING_MODE === 'production' 
-      ? 'https://chat-app-vyqv.onrender.com' 
-      : 'http://localhost:5001', {
+    const socket = io(BASE_URL, {
       autoConnect: false,
     });
 
-    socket.on('connect', () => {
-      console.log('Socket connected');
+    socket.on("connect", () => {
+      console.log("Socket connected");
     });
 
-    socket.on('newMessage', (newMessage: Message) => {
+    socket.on("newMessage", (newMessage: Message) => {
       const { selectedUser } = get();
-      if (selectedUser && 
-          (newMessage.senderId === selectedUser._id || 
-           newMessage.receiverId === selectedUser._id)) {
-        set(state => ({ messages: [...state.messages, newMessage] }));
+      if (
+        selectedUser &&
+        (newMessage.senderId === selectedUser._id ||
+          newMessage.receiverId === selectedUser._id)
+      ) {
+        set((state) => ({ messages: [...state.messages, newMessage] }));
       }
     });
 
@@ -78,10 +83,21 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   getUsers: async () => {
     set({ isUsersLoading: true });
     try {
-      const res = await axiosInstance.get("/messages/users");
-      set({ users: res.data });
+      const res = await fetch(`${BASE_URL}/api/messages/users`, {
+        credentials: "include",
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to load users");
+
+      set({ users: data });
     } catch (error: any) {
-      toast.error(error.response?.data?.error || "Failed to load users");
+      console.error("Failed to load users:", error);
+      toast.error(error.message || "Failed to load users");
+
+      if (error.message?.includes("401")) {
+        window.location.href = "/signin";
+      }
     } finally {
       set({ isUsersLoading: false });
     }
@@ -90,51 +106,68 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   getMessages: async (userId: string) => {
     set({ isMessagesLoading: true });
     try {
-      const res = await axiosInstance.get(`/messages/${userId}`);
-      set({ messages: res.data });
+      const res = await fetch(`${BASE_URL}/api/messages/${userId}`, {
+        credentials: "include",
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to load messages");
+
+      set({ messages: data });
     } catch (error: any) {
-      toast.error(error.response?.data?.error || "Failed to load messages");
+      toast.error(error.message || "Failed to load messages");
     } finally {
       set({ isMessagesLoading: false });
     }
   },
-
   sendMessage: async (messageData) => {
     const { selectedUser, socket } = get();
     if (!selectedUser) {
       toast.error("No user selected");
       return;
     }
-
+  
     try {
       const formData = new FormData();
-      if (messageData.text) formData.append('text', messageData.text);
+      formData.append("text", messageData.text || "");
+  
       if (messageData.image) {
-        // Convert base64 to blob if needed
-        const blob = await fetch(messageData.image).then(r => r.blob());
-        formData.append('file', blob);
+        const file = messageData.image instanceof File 
+          ? messageData.image 
+          : await dataUrlToFile(messageData.image);
+        formData.append("file", file);
       }
-
-      const res = await axiosInstance.post(
-        `/messages/send/${selectedUser._id}`,
-        formData,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
-      );
-
-      set(state => ({ messages: [...state.messages, res.data] }));
+  
+      const res = await fetch(`${BASE_URL}/api/messages/send/${selectedUser._id}`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+  
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData?.error || "Failed to send message");
+      }
+  
+      const newMessage = await res.json();
       
-      // Notify via socket
+      // Update local state immediately
+      set((state) => ({ 
+        messages: [...state.messages, newMessage],
+      }));
+  
+      // Emit via socket if available
       if (socket) {
-        socket.emit('sendMessage', {
-          receiverId: selectedUser._id,
-          message: res.data
-        });
+        socket.emit("sendMessage", newMessage);
       }
+  
+      return newMessage;
     } catch (error: any) {
-      toast.error(error.response?.data?.error || "Failed to send message");
+      console.error("Send failed:", error);
+      toast.error(error.message || "Failed to send message");
+      throw error;
     }
   },
-
   setSelectedUser: (user) => {
     set({ selectedUser: user, messages: [] });
     if (user) get().getMessages(user._id);
@@ -145,9 +178,11 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     if (!socket || !selectedUser) return;
 
     socket.on("newMessage", (newMessage: Message) => {
-      if (newMessage.senderId === selectedUser._id || 
-          newMessage.receiverId === selectedUser._id) {
-        set(state => ({ messages: [...state.messages, newMessage] }));
+      if (
+        newMessage.senderId === selectedUser._id ||
+        newMessage.receiverId === selectedUser._id
+      ) {
+        set((state) => ({ messages: [...state.messages, newMessage] }));
       }
     });
   },
@@ -158,5 +193,21 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       socket.off("newMessage");
     }
   },
-
 }));
+function dataUrlToFile(dataUrl: string): File {
+  const [header, base64Data] = dataUrl.split(",");
+  const mimeMatch = header.match(/:(.*?);/);
+  if (!mimeMatch) {
+    throw new Error("Invalid data URL");
+  }
+  const mimeType = mimeMatch[1];
+  const binaryString = atob(base64Data);
+  const byteArray = new Uint8Array(binaryString.length);
+
+  for (let i = 0; i < binaryString.length; i++) {
+    byteArray[i] = binaryString.charCodeAt(i);
+  }
+
+  return new File([byteArray], "image", { type: mimeType });
+}
+

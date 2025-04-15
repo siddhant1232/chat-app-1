@@ -1,3 +1,4 @@
+// src/components/NoChatSelected
 import { MessageSquare } from "lucide-react";
 
 const NoChatSelected = () => {

@@ -1,3 +1,4 @@
+// src/components/MessagingInput
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { Image, Send, X } from "lucide-react";
@@ -45,29 +46,34 @@ const MessageInput = () => {
     setImagePreview(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim() && !imagePreview) {
-      toast.error("Message cannot be empty");
+    
+    const imageFile = fileInputRef.current?.files?.[0];
+    const hasContent = text.trim() || imageFile || imagePreview;
+    
+    if (!hasContent) {
+      toast.error("Please enter a message");
       return;
     }
-
+  
     setIsSending(true);
     try {
       await sendMessage({
-        text: text.trim(),
-        image: imagePreview || undefined,
+        text: text.trim(), // Ensure text is properly passed
+        image: imageFile || imagePreview || undefined,
       });
+      
+      // Reset form
       setText("");
-      removeImage();
+      setImagePreview(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (error) {
-      console.error("Send message error:", error);
+      console.error("Send error:", error);
     } finally {
       setIsSending(false);
     }
   };
-
   return (
     <div className="p-4 w-full bg-base-100 border-t border-base-300">
       {imagePreview && (

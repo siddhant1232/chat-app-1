@@ -1,17 +1,11 @@
 import { create } from "zustand";
-import axios, { axiosInstance } from "../lib/axios.js";
 import toast from "react-hot-toast";
 import io, { type Socket } from "socket.io-client";
 
 const BASE_URL =
   import.meta.env.VITE_WORKING_MODE === "development"
-    ? "http://localhost:5001" 
-    : "https://chat-app-vyqv.onrender.com"; 
-
-
-
-    console.log("Backend URL:", import.meta.env.VITE_BACKEND_URL);
-
+    ? "http://localhost:5001"
+    : "https://chat-app-vyqv.onrender.com";
 
 interface SignupData {
   fullname: string;
@@ -27,7 +21,6 @@ interface LoginData {
 interface ProfileUpdateData {
   fullname?: string;
   profilepic?: string;
-
 }
 
 interface AuthUser {
@@ -67,30 +60,48 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
   checkAuth: async () => {
     try {
-      const res = await axiosInstance.get("/auth/check");
-      set({ authUser: res.data });
+      const res = await fetch(`${BASE_URL}/api/auth/check`, {
+        method: "GET",
+        credentials: "include", // Send cookies along
+        headers: {
+          // If there's a token, add it here (you may have to manage it in cookies or localStorage)
+          "Authorization": `Bearer ${document.cookie}`, // or replace with your own method of storing the token
+        },
+      });
+  
+      if (!res.ok) throw new Error("Failed to check auth");
+  
+      const data = await res.json();
+      set({ authUser: data });
       get().connectSocket();
-    } catch (error: unknown) {
-      console.log("Error in checkAuth:", error);
+    } catch (error) {
+      console.error("Error in checkAuth:", error);
       set({ authUser: null });
     } finally {
       set({ isCheckingAuth: false });
     }
   },
+  
 
   signup: async (data: SignupData) => {
     set({ isSigningUp: true });
     try {
-      const res = await axiosInstance.post("/auth/signup", data);
-      set({ authUser: res.data });
+      const res = await fetch(`${BASE_URL}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+
+      const resData = await res.json();
+
+      if (!res.ok) throw new Error(resData.message || "Signup failed");
+
+      set({ authUser: resData });
       toast.success("Account created successfully");
       get().connectSocket();
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.data?.message) {
-        toast.error(error.response.data.message);
-      } else {
-        toast.error("An unexpected error occurred");
-      }
+    } catch (error: any) {
+      toast.error(error.message || "An unexpected error occurred");
     } finally {
       set({ isSigningUp: false });
     }
@@ -99,16 +110,22 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   login: async (data: LoginData) => {
     set({ isLoggingIn: true });
     try {
-      const res = await axiosInstance.post("/auth/signin", data);
-      set({ authUser: res.data });
+      const res = await fetch(`${BASE_URL}/api/auth/signin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+
+      const resData = await res.json();
+
+      if (!res.ok) throw new Error(resData.message || "Login failed");
+
+      set({ authUser: resData });
       toast.success("Logged in successfully");
       get().connectSocket();
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.data?.message) {
-        toast.error(error.response.data.message);
-      } else {
-        toast.error("An unexpected error occurred");
-      }
+    } catch (error: any) {
+      toast.error(error.message || "An unexpected error occurred");
     } finally {
       set({ isLoggingIn: false });
     }
@@ -116,31 +133,41 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
   logout: async () => {
     try {
-      await axiosInstance.post("/auth/logout");
+      const res = await fetch(`${BASE_URL}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const resData = await res.json();
+
+      if (!res.ok) throw new Error(resData.message || "Logout failed");
+
       set({ authUser: null });
       toast.success("Logged out successfully");
       get().disconnectSocket();
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.data?.message) {
-        toast.error(error.response.data.message);
-      } else {
-        toast.error("An unexpected error occurred");
-      }
+    } catch (error: any) {
+      toast.error(error.message || "An unexpected error occurred");
     }
   },
 
   updateProfile: async (data: ProfileUpdateData) => {
     set({ isUpdatingProfile: true });
     try {
-      const res = await axiosInstance.put("/auth/update-profile", data);
-      set({ authUser: res.data });
+      const res = await fetch(`${BASE_URL}/api/auth/update-profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+
+      const resData = await res.json();
+
+      if (!res.ok) throw new Error(resData.message || "Update failed");
+
+      set({ authUser: resData });
       toast.success("Profile updated successfully");
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.data?.message) {
-        toast.error(error.response.data.message);
-      } else {
-        toast.error("An unexpected error occurred");
-      }
+    } catch (error: any) {
+      toast.error(error.message || "An unexpected error occurred");
     } finally {
       set({ isUpdatingProfile: false });
     }
@@ -149,36 +176,35 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   connectSocket: () => {
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;
-  
-    // Ensure the URL is correct (no `/api` or trailing slash)
+
     const socket = io(BASE_URL, {
       transportOptions: {
         polling: {
           extraHeaders: {
-            "Authorization": `Bearer ${document.cookie}`, // Replace with your auth mechanism
+            Authorization: `Bearer ${document.cookie}`,
           },
         },
-      }, // Required for cookies/auth
+      },
       query: {
         userId: authUser._id,
       },
     });
-  
+
     socket.on("connect", () => {
       console.log("Socket connected!");
     });
-  
+
     socket.on("disconnect", () => {
       console.log("Socket disconnected");
     });
-  
+
     socket.on("getOnlineUsers", (userIds: string[]) => {
       set({ onlineUsers: userIds });
     });
-  
+
     set({ socket });
   },
-  
+
   disconnectSocket: () => {
     if (get().socket?.connected) get().socket.disconnect();
   },

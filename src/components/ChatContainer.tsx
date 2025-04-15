@@ -1,3 +1,4 @@
+// src/components/ChatContainer
 import { useChatStore } from "../store/useChatStore";
 import { useEffect, useRef } from "react";
 
